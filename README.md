@@ -21,9 +21,7 @@ This API follows the Maven structure to ease its installation within your projec
 # Test API
 If you want to test the API, follow these steps:
 
-1. Create a folder and copy its the absolute path.  This folder will be your storage root target.
-2. Create a folder and copy its the absolute path.  This folder will be your tmp folder.
-3. Open with a text editor the settings.json located on test/resources/settings.json
+1. Open with a text editor the settings.json located on test/resources/settings.json
 ```json
 {
 	"provider": "aws.s3",
@@ -44,8 +42,9 @@ If you want to test the API, follow these steps:
 	}
 }
 ```
-4. Paste the absolute paths, the root's path and the tmp's path.
-5. Save the settings.json file.
+2. The root and tmp keys are the main data to be filled.  Create a local folder called **tmp** and paste its path on the key **tmp**.
+3. Create a folder i.e: **universalstorage** in your root app folder, copy the name and then paste it on root attribute.
+4. Save the settings.json file.
 
 **Now execute the following command:**
 
@@ -74,9 +73,10 @@ If you want to test the API, follow these steps:
 	}
 }
 ```
-2. The root and tmp keys are the main data to be filled, create two folders representing each one root and tmp.
-3. Save the file settings.json
-4. Add the maven dependency in your pom.xml file.
+2. The root and tmp keys are the main data to be filled.  Create a local folder called **tmp** and paste its path on the key **tmp**.
+3. Create a folder i.e: **universalstorage** in your root app folder, copy the name and then paste it on root attribute.
+4. Save the file settings.json
+5. Add the maven dependency in your pom.xml file.
 
 ```xml
 <dependency>
@@ -87,6 +87,7 @@ If you want to test the API, follow these steps:
 ```
 
 The root folder is the storage where the files will be stored.
+
 The tmp folder is where temporary files will be stored.
   
 # How to use
@@ -122,3 +123,71 @@ try {
     fail(e.getMessage());
 }
 ```
+
+**Remove file:**
+```java
+try {
+      UniversalStorage us = UniversalStorage.Impl.getInstance();
+      us.removeFile("/home/test/resources/settings.json");
+} catch (UniversalStorageException e) {
+    e.printStackTrace();
+}
+
+```
+
+**Create folder:**
+
+```java
+try {
+      UniversalStorage us = UniversalStorage.Impl.getInstance();
+      us.createFolder("/myNewFolder");
+} catch (UniversalStorageException e) {
+    e.printStackTrace();
+}
+
+```
+
+**Remove folder:**
+```java
+try {
+      UniversalStorage us = UniversalStorage.Impl.getInstance();
+      us.removeFolder("/myNewFolder");
+} catch (UniversalStorageException e) {
+    e.printStackTrace();
+}
+```
+
+**Retrieve file:**
+
+This file will be stored into the tmp folder.
+```java
+try {
+      UniversalStorage us = UniversalStorage.Impl.getInstance();
+      File file = us.retrieveFile("myFolder/file.txt");
+} catch (UniversalStorageException e) {
+    e.printStackTrace();
+}
+```
+
+**Retrieve file as InputStream:**
+
+This inputstream will use a file that was stored into the tmp folder.
+```java
+try {
+      UniversalStorage us = UniversalStorage.Impl.getInstance();
+      InputSstream stream = us.retrieveFileAsStream("myFolder/file.txt");
+} catch (UniversalStorageException e) {
+    e.printStackTrace();
+}
+```
+
+**Clean up tmp folder:**
+```java
+try {
+      UniversalStorage us = UniversalStorage.Impl.getInstance();
+      us.clean();
+} catch (UniversalStorageException e) {
+    e.printStackTrace();
+}
+```
+
