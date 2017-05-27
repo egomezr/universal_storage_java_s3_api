@@ -1,0 +1,26 @@
+{
+	"provider": "aws.s3",
+	"root": "storage-travis-test",
+	"tmp": "src/test/resources/tmp",
+	"aws_s3": {
+		"access_key": "",
+		"secret_key": "",
+		"storage_class": "STANDARD",
+		"s3_region": "us-east-1",
+		"encryption": false,
+		"tags": [
+			{
+				"key": "application",
+				"value": "Test cases"
+			},
+			{
+				"key": "env",
+				"value": "test"
+			},
+			{
+				"key": "source",
+				"value": "Sao Paulo"
+			}
+		]
+	}
+}
