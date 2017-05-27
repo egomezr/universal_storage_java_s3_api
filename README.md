@@ -13,7 +13,9 @@ Universal storage provides you an interface for storing files according to your 
 1. [Maven project](maven-project)
 2. [Test API](#test-api)
 3. [Settings](#settings)
-4. [How to use](#how-to-use)
+4. [Explanation for setting keys](#explanation-for-setting-keys)
+5. [AWS s3 account and root bucket](#aws-s3-account-and-root-bucket)
+6. [How to use](#how-to-use)
 
 # Maven project
 This API follows the Maven structure to ease its installation within your project.
@@ -85,6 +87,48 @@ If you want to test the API, follow these steps:
    <version>1.0.0</version>
 </dependency>
 ```
+# Explanation for setting keys
+
+`storage_class` is the storage class for every uploaded file to your root bucket. Possible values: `STANDARD` `STANDARD_IA` `REDUCED_REDUNDANCY`
+
+`s3_region` region where the root bucket was created.
+
+`encryption` enable encryption at rest for every uploaded file to your root bucket.
+
+`tags` tags for every uploaded file to your root bucket.
+
+# AWS s3 account and root bucket
+
+In order to use AWS s3 as a storage, you need a aws account and create a bucket where the files will be stored.
+
+1. Sign up [here](https://aws.amazon.com/es/free/) for a new account.
+2. After account creation, go to s3 service and create a new bucket. This bucket will be your root "folder".
+
+<img src='https://s3.amazonaws.com/shared-files-2017/s3_root_bucket.png' alt=''/>
+
+3. Copy the name of your root bucket and paste it into the settings.json file
+```json
+{
+	"provider": "aws.s3",
+	"root": "bucket-name-in-s3"
+}
+```
+
+4. Universal storage needs access to your bucket. We recommend to create a IAM user, apply the necessary permissions and generate access keys, paste these access keys into the settings.json file.
+
+```json
+{
+	"provider": "aws.s3",
+	"root": "bucket-name-in-s3",
+	"tmp": "/home/tmp",
+	"aws_s3": {
+		"access_key": "access_key_from_s3",
+		"secret_key": "secret_key_from_s3",
+	}
+}
+```
+
+### This api will get the access_key and secret_key through either this file or environment variables `access_key` and `secret_key`
 
 The root folder is the storage where the files will be stored.
 
