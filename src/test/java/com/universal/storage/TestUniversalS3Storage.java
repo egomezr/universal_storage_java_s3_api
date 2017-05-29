@@ -39,8 +39,6 @@ public class TestUniversalS3Storage extends TestCase {
 
             us.storeFile(new File(System.getProperty("user.home"), fileName), folderName);
             us.storeFile(new File(System.getProperty("user.home"), fileName));
-            us.storeFile(System.getProperty("user.home") + "/" + fileName, folderName);
-            us.storeFile(System.getProperty("user.home") + "/" + fileName);
         } catch (Exception e) {
             fail(e.getMessage());
         }

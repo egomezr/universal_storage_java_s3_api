@@ -21,6 +21,14 @@ import com.amazonaws.services.s3.model.S3Object;
 import com.amazonaws.services.s3.model.GetObjectRequest;
 import com.amazonaws.services.s3.AmazonS3ClientBuilder;
 import com.amazonaws.regions.Regions;
+import com.amazonaws.services.s3.model.CompleteMultipartUploadRequest;
+import com.amazonaws.services.s3.model.PartETag;
+import com.amazonaws.services.s3.model.UploadPartRequest;
+import com.amazonaws.services.s3.model.InitiateMultipartUploadRequest;
+import com.amazonaws.services.s3.model.InitiateMultipartUploadResult;
+import com.amazonaws.services.s3.model.AbortMultipartUploadRequest;
+import com.amazonaws.services.s3.model.SetObjectTaggingRequest;
+import com.amazonaws.services.s3.model.CopyObjectRequest;
 
 
 /**
@@ -50,6 +58,7 @@ import com.amazonaws.regions.Regions;
  * This implementation will manage file using a S3 bucket as a root storage.
  */
 public class UniversalS3Storage extends UniversalStorage {
+    private static final long PART_SIZE = 5242880; // Set part size to 5 MB.
     private AmazonS3 s3client;
     /**
      * This constructor receives the settings for this new FileStorage instance.
@@ -88,14 +97,34 @@ public class UniversalS3Storage extends UniversalStorage {
      * @throws UniversalIOException when a specific IO error occurs.
      */
     void storeFile(File file, String path) throws UniversalIOException {
-        if (file.isDirectory()) {
-            throw new UniversalIOException(file.getName() + " is a folder.  You should call the createFolder method.");
-        }
+        if (file.length() <= PART_SIZE) {
+            uploadTinyFile(file, path);
+        } else {
+            uploadFile(file, path);
+        }        
+    }
 
-        if (path == null) {
-            path = "";
-        }
-        
+    /**
+     * This method uploads a file with a length greater than PART_SIZE (5Mb).
+     * 
+     * @param file to be stored within the storage.
+     * @param path is the path for this new file within the root.
+     * @throws UniversalIOException when a specific IO error occurs.
+     */
+    private void uploadFile(File file, String path) throws UniversalIOException {
+         // Create a list of UploadPartResponse objects. You get one of these
+        // for each part upload.
+        List<PartETag> partETags = new ArrayList<PartETag>();
+
+        // Step 1: Initialize.
+        InitiateMultipartUploadRequest initRequest = new 
+             InitiateMultipartUploadRequest(this.settings.getRoot(), file.getName());
+        InitiateMultipartUploadResult initResponse = 
+        	                   this.s3client.initiateMultipartUpload(initRequest);
+
+        long contentLength = file.length();
+        long partSize = PART_SIZE; // Set part size to 5 MB.
+
         ObjectMetadata objectMetadata = new ObjectMetadata();
         if (this.settings.getEncryption()) {
             objectMetadata.setSSEAlgorithm(ObjectMetadata.AES_256_SERVER_SIDE_ENCRYPTION);     
@@ -106,12 +135,92 @@ public class UniversalS3Storage extends UniversalStorage {
             tags.add(new Tag(key, this.settings.getTags().get(key)));
         }
 
-        PutObjectRequest request = new PutObjectRequest(this.settings.getRoot() + ("".equals(path) ? "" : ("/" + path)), file.getName(), file);
-        request.setMetadata(objectMetadata);
-        request.setTagging(new ObjectTagging(tags));
-        request.setStorageClass(getStorageClass());
+        try {
+            // Step 2: Upload parts.
+            long filePosition = 0;
+            for (int i = 1; filePosition < contentLength; i++) {
+                // Last part can be less than 5 MB. Adjust part size.
+            	partSize = Math.min(partSize, (contentLength - filePosition));
+            	
+                // Create request to upload a part.
+                UploadPartRequest uploadRequest = new UploadPartRequest()
+                    .withBucketName(this.settings.getRoot()).withKey(file.getName())
+                    .withUploadId(initResponse.getUploadId()).withPartNumber(i)
+                    .withFileOffset(filePosition)
+                    .withFile(file)
+                    .withObjectMetadata(objectMetadata)
+                    .withPartSize(partSize);
 
-        this.s3client.putObject(request);
+                // Upload part and add response to our list.
+                partETags.add(this.s3client.uploadPart(uploadRequest).getPartETag());
+
+                filePosition += partSize;
+            }
+
+            // Step 3: Complete.
+            CompleteMultipartUploadRequest compRequest = new CompleteMultipartUploadRequest(
+                                    this.settings.getRoot(), 
+                                    file.getName(), 
+                                    initResponse.getUploadId(), 
+                                    partETags);
+
+            this.s3client.completeMultipartUpload(compRequest);
+
+            StorageClass storageClass = getStorageClass();
+            if (storageClass != StorageClass.Standard) {
+                CopyObjectRequest copyObjectRequest = new CopyObjectRequest(this.settings.getRoot(), file.getName(), 
+                    this.settings.getRoot(), file.getName()).withStorageClass(storageClass);
+
+                this.s3client.copyObject(copyObjectRequest);
+            }
+
+            if (!tags.isEmpty()) {
+                this.s3client.setObjectTagging(new SetObjectTaggingRequest(this.settings.getRoot(), file.getName(), new ObjectTagging(tags)));
+            }
+        } catch (Exception e) {
+            this.s3client.abortMultipartUpload(new AbortMultipartUploadRequest(
+                    this.settings.getRoot(), file.getName(), initResponse.getUploadId()));
+
+            throw new UniversalIOException(e.getMessage());
+        }
+    }
+
+    /**
+     * This method uploads a file with a length lesser than PART_SIZE (5Mb).
+     * 
+     * @param file to be stored within the storage.
+     * @param path is the path for this new file within the root.
+     * @throws UniversalIOException when a specific IO error occurs.
+     */
+    private void uploadTinyFile(File file, String path) throws UniversalIOException {
+        if (file.isDirectory()) {
+            throw new UniversalIOException(file.getName() + " is a folder.  You should call the createFolder method.");
+        }
+
+        if (path == null) {
+            path = "";
+        }
+        
+        try {
+            ObjectMetadata objectMetadata = new ObjectMetadata();
+            if (this.settings.getEncryption()) {
+                objectMetadata.setSSEAlgorithm(ObjectMetadata.AES_256_SERVER_SIDE_ENCRYPTION);     
+            }
+
+            List<Tag> tags = new ArrayList<Tag>();
+            for (String key : this.settings.getTags().keySet()) {
+                tags.add(new Tag(key, this.settings.getTags().get(key)));
+            }
+
+            PutObjectRequest request = new PutObjectRequest(this.settings.getRoot() + ("".equals(path) ? "" : ("/" + path)), file.getName(), file);
+            request.setMetadata(objectMetadata);
+            request.setTagging(new ObjectTagging(tags));
+            request.setStorageClass(getStorageClass());
+
+            this.s3client.putObject(request);
+        } catch(Exception e) {
+            throw new UniversalIOException(e.getMessage());
+        }
     }
 
     /**

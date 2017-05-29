@@ -5,21 +5,13 @@
 	"aws_s3": {
 		"access_key": "",
 		"secret_key": "",
-		"storage_class": "STANDARD",
+		"storage_class": "REDUCED_REDUNDANCY",
 		"s3_region": "us-east-1",
 		"encryption": false,
 		"tags": [
 			{
 				"key": "application",
 				"value": "Test cases"
-			},
-			{
-				"key": "env",
-				"value": "test"
-			},
-			{
-				"key": "source",
-				"value": "Sao Paulo"
 			}
 		]
 	}
