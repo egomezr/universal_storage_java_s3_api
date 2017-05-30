@@ -235,3 +235,116 @@ try {
 }
 ```
 
+**Wipe root folder:**
+```java
+try {
+      UniversalStorage us = UniversalStorage.Impl.getInstance();
+      us.wipe();
+} catch (UniversalStorageException e) {
+    e.printStackTrace();
+}
+```
+
+**Register listeners**
+
+This API provides useful listeners for asynchronous situations.
+
+Your custom listener must implement this interface.  This interface provides a series of methods for every situation, for example, a listener when the method "storeFile" is either starting or ending, when error occurs during any kind of process, Etc.
+
+```java
+public interface UniversalStorageListener {}
+```
+
+**Register a listener**
+
+```java
+UniversalStorage us = UniversalStorage.Impl.getInstance();
+us.registerListener(new UniversalStorageListenerAdapter() {
+     public void onFolderCreated(UniversalStorageData data) {
+         System.out.println(data.toString());
+     }
+
+     public void onFileStored(UniversalStorageData data) {
+         System.out.println(data.toString());
+     }
+
+     public void onError(UniversalIOException error) {
+         System.out.println(error.getMessage());
+     }
+ });
+```
+
+**Listener adapter**
+
+This adapter is useful for situation where you're needing only one or two implementation of **UniversalStorageListener** class.
+
+```java
+public class UniversalStorageListenerAdapter implements UniversalStorageListener {
+    /**
+     * This method will be called just before storing process.
+     */
+    public void onStoreFile() {
+
+    }
+
+    /**
+     * This method will be called just before creation process.
+     */
+    public void onCreateFolder() {
+        
+    }
+
+    /**
+     * This method will be called just before file removing process.
+     */
+    public void onRemoveFile() {
+        
+    }
+
+    /**
+     * This method will be called just before folder removing process.
+     */
+    public void onRemoveFolder() {
+        
+    }
+
+    /**
+     * This method will be called when an error occurs.
+     */
+    public void onError(UniversalIOException error) {
+        
+    }
+
+    /**
+     * This method will be called just after storing process.
+     * 
+     * @param data contains data about the new file.
+     */
+    public void onFileStored(UniversalStorageData data) {
+        
+    }
+
+    /**
+     * This method will be called just after creation process.
+     * 
+     * @param data contains data about the new folder.
+     */
+    public void onFolderCreated(UniversalStorageData data) {
+        
+    }
+
+    /**
+     * This method will be called just after file removing process.
+     */
+    public void onFileRemoved() {
+        
+    }
+
+    /**
+     * This method will be called just after folder removing process.
+     */
+    public void onFolderRemoved() {
+        
+    }
+}
+```
