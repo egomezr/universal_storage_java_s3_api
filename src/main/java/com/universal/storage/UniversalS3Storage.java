@@ -9,9 +9,11 @@ import java.io.InputStream;
 import java.io.ByteArrayInputStream;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.Iterator;
 import org.apache.commons.io.FileUtils;
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.model.PutObjectRequest;
+import com.amazonaws.services.s3.model.PutObjectResult;
 import com.amazonaws.services.s3.model.ObjectMetadata;
 import com.amazonaws.services.s3.model.StorageClass;
 import com.amazonaws.services.s3.model.Tag;
@@ -22,6 +24,7 @@ import com.amazonaws.services.s3.model.GetObjectRequest;
 import com.amazonaws.services.s3.AmazonS3ClientBuilder;
 import com.amazonaws.regions.Regions;
 import com.amazonaws.services.s3.model.CompleteMultipartUploadRequest;
+import com.amazonaws.services.s3.model.CompleteMultipartUploadResult;
 import com.amazonaws.services.s3.model.PartETag;
 import com.amazonaws.services.s3.model.UploadPartRequest;
 import com.amazonaws.services.s3.model.InitiateMultipartUploadRequest;
@@ -29,7 +32,11 @@ import com.amazonaws.services.s3.model.InitiateMultipartUploadResult;
 import com.amazonaws.services.s3.model.AbortMultipartUploadRequest;
 import com.amazonaws.services.s3.model.SetObjectTaggingRequest;
 import com.amazonaws.services.s3.model.CopyObjectRequest;
-
+import com.amazonaws.services.s3.model.ObjectListing;
+import com.amazonaws.services.s3.model.VersionListing;
+import com.amazonaws.services.s3.model.S3ObjectSummary;
+import com.amazonaws.services.s3.model.ListVersionsRequest;
+import com.amazonaws.services.s3.model.S3VersionSummary;
 
 /**
  * The MIT License (MIT)
@@ -58,6 +65,7 @@ import com.amazonaws.services.s3.model.CopyObjectRequest;
  * This implementation will manage file using a S3 bucket as a root storage.
  */
 public class UniversalS3Storage extends UniversalStorage {
+    private static final String PREFIX_S3_URL = "https://s3.amazonaws.com/";
     private static final long PART_SIZE = 5242880; // Set part size to 5 MB.
     private AmazonS3 s3client;
     /**
@@ -97,6 +105,16 @@ public class UniversalS3Storage extends UniversalStorage {
      * @throws UniversalIOException when a specific IO error occurs.
      */
     void storeFile(File file, String path) throws UniversalIOException {
+        if (file.isDirectory()) {
+            UniversalIOException error = new UniversalIOException(file.getName() + " is a folder.  You should call the createFolder method.");
+            this.triggerOnErrorListeners(error);
+            throw error;
+        }
+
+        if (path == null) {
+            path = "";
+        }
+
         if (file.length() <= PART_SIZE) {
             uploadTinyFile(file, path);
         } else {
@@ -136,6 +154,7 @@ public class UniversalS3Storage extends UniversalStorage {
         }
 
         try {
+            this.triggerOnStoreFileListeners();
             // Step 2: Upload parts.
             long filePosition = 0;
             for (int i = 1; filePosition < contentLength; i++) {
@@ -144,7 +163,8 @@ public class UniversalS3Storage extends UniversalStorage {
             	
                 // Create request to upload a part.
                 UploadPartRequest uploadRequest = new UploadPartRequest()
-                    .withBucketName(this.settings.getRoot()).withKey(file.getName())
+                    .withBucketName(this.settings.getRoot() + ("".equals(path) ? "" : ("/" + path)))
+                    .withKey(file.getName())
                     .withUploadId(initResponse.getUploadId()).withPartNumber(i)
                     .withFileOffset(filePosition)
                     .withFile(file)
@@ -159,12 +179,12 @@ public class UniversalS3Storage extends UniversalStorage {
 
             // Step 3: Complete.
             CompleteMultipartUploadRequest compRequest = new CompleteMultipartUploadRequest(
-                                    this.settings.getRoot(), 
+                                    this.settings.getRoot() + ("".equals(path) ? "" : ("/" + path)), 
                                     file.getName(), 
                                     initResponse.getUploadId(), 
                                     partETags);
 
-            this.s3client.completeMultipartUpload(compRequest);
+            CompleteMultipartUploadResult result = this.s3client.completeMultipartUpload(compRequest);
 
             StorageClass storageClass = getStorageClass();
             if (storageClass != StorageClass.Standard) {
@@ -177,11 +197,18 @@ public class UniversalS3Storage extends UniversalStorage {
             if (!tags.isEmpty()) {
                 this.s3client.setObjectTagging(new SetObjectTaggingRequest(this.settings.getRoot(), file.getName(), new ObjectTagging(tags)));
             }
+
+            this.triggerOnFileStoredListeners(new UniversalStorageData(file.getName(), 
+                            PREFIX_S3_URL + (this.settings.getRoot() + ("".equals(path) ? "" : ("/" + path))) + "/" + file.getName(),
+                            result.getVersionId(), 
+                            this.settings.getRoot() + ("".equals(path) ? "" : ("/" + path))));
         } catch (Exception e) {
             this.s3client.abortMultipartUpload(new AbortMultipartUploadRequest(
                     this.settings.getRoot(), file.getName(), initResponse.getUploadId()));
 
-            throw new UniversalIOException(e.getMessage());
+            UniversalIOException error = new UniversalIOException(e.getMessage());
+            this.triggerOnErrorListeners(error);
+            throw error;
         }
     }
 
@@ -193,14 +220,6 @@ public class UniversalS3Storage extends UniversalStorage {
      * @throws UniversalIOException when a specific IO error occurs.
      */
     private void uploadTinyFile(File file, String path) throws UniversalIOException {
-        if (file.isDirectory()) {
-            throw new UniversalIOException(file.getName() + " is a folder.  You should call the createFolder method.");
-        }
-
-        if (path == null) {
-            path = "";
-        }
-        
         try {
             ObjectMetadata objectMetadata = new ObjectMetadata();
             if (this.settings.getEncryption()) {
@@ -216,10 +235,18 @@ public class UniversalS3Storage extends UniversalStorage {
             request.setMetadata(objectMetadata);
             request.setTagging(new ObjectTagging(tags));
             request.setStorageClass(getStorageClass());
+            this.triggerOnStoreFileListeners();
+            
+            PutObjectResult result = this.s3client.putObject(request);
 
-            this.s3client.putObject(request);
+            this.triggerOnFileStoredListeners(new UniversalStorageData(file.getName(), 
+                            PREFIX_S3_URL + (this.settings.getRoot() + ("".equals(path) ? "" : ("/" + path))) + "/" + file.getName(),
+                            result.getVersionId(), 
+                            this.settings.getRoot() + ("".equals(path) ? "" : ("/" + path))));
         } catch(Exception e) {
-            throw new UniversalIOException(e.getMessage());
+            UniversalIOException error = new UniversalIOException(e.getMessage());
+            this.triggerOnErrorListeners(error);
+            throw error;
         }
     }
 
@@ -285,9 +312,13 @@ public class UniversalS3Storage extends UniversalStorage {
         PathValidator.validatePath(path);
 
         try {
+            this.triggerOnRemoveFileListeners();
             s3client.deleteObject(new DeleteObjectRequest(this.settings.getRoot(), path));
+            this.triggerOnFileRemovedListeners();        
         } catch (Exception e) {
-            throw new UniversalIOException(e.getMessage());
+            UniversalIOException error = new UniversalIOException(e.getMessage());
+            this.triggerOnErrorListeners(error);
+            throw error;
         }        
     }
 
@@ -314,17 +345,33 @@ public class UniversalS3Storage extends UniversalStorage {
         PathValidator.validatePath(path);
 
         if ("".equals(path.trim())) {
-            throw new UniversalIOException("Invalid path.  The path shouldn't be empty.");
+            UniversalIOException error = new UniversalIOException("Invalid path.  The path shouldn't be empty.");
+            this.triggerOnErrorListeners(error);
+            throw error;
         }
 
         ObjectMetadata metadata = new ObjectMetadata();
         metadata.setContentLength(0);
 
         InputStream emptyContent = new ByteArrayInputStream(new byte[0]);
-        PutObjectRequest putObjectRequest = new PutObjectRequest(this.settings.getRoot(),
-                path.endsWith("/") ? path : (path + "/"), emptyContent, metadata);
 
-        s3client.putObject(putObjectRequest);
+        try {
+            PutObjectRequest putObjectRequest = new PutObjectRequest(this.settings.getRoot(),
+                    path.endsWith("/") ? path : (path + "/"), emptyContent, metadata);
+
+            this.triggerOnCreateFolderListeners();
+
+            PutObjectResult result = s3client.putObject(putObjectRequest);
+
+            this.triggerOnFolderCreatedListeners(new UniversalStorageData(path, 
+                            PREFIX_S3_URL + (this.settings.getRoot() + ("".equals(path) ? "" : ("/" + path))),
+                            result.getVersionId(), 
+                            this.settings.getRoot() + ("".equals(path) ? "" : ("/" + path))));
+        } catch(Exception e) {
+            UniversalIOException error = new UniversalIOException(e.getMessage());
+            this.triggerOnErrorListeners(error);
+            throw error;
+        }
     }
 
     /**
@@ -350,10 +397,14 @@ public class UniversalS3Storage extends UniversalStorage {
         }
 
         try {
+            this.triggerOnRemoveFolderListeners();
             s3client.deleteObject(new DeleteObjectRequest(this.settings.getRoot(), 
                     path.endsWith("/") ? path : (path + "/")));
+            this.triggerOnFolderRemovedListeners();
         } catch (Exception e) {
-            throw new UniversalIOException(e.getMessage());
+            UniversalIOException error = new UniversalIOException(e.getMessage());
+            this.triggerOnErrorListeners(error);
+            throw error;
         }
     }
 
@@ -373,7 +424,9 @@ public class UniversalS3Storage extends UniversalStorage {
         }
 
         if (path.trim().endsWith("/")) {
-            throw new UniversalIOException("Invalid path.  Looks like you're trying to retrieve a folder.");
+            UniversalIOException error = new UniversalIOException("Invalid path.  Looks like you're trying to retrieve a folder.");
+            this.triggerOnErrorListeners(error);
+            throw error;
         }
         
         File dest = null;
@@ -392,7 +445,9 @@ public class UniversalS3Storage extends UniversalStorage {
 
             FileUtils.copyInputStreamToFile(objectData, dest);
         } catch (Exception e) {
-            throw new UniversalIOException(e.getMessage());
+            UniversalIOException error = new UniversalIOException(e.getMessage());
+            this.triggerOnErrorListeners(error);
+            throw error;
         } finally {
             if (objectData != null) {
                 try {
@@ -420,11 +475,19 @@ public class UniversalS3Storage extends UniversalStorage {
         }
 
         if (path.trim().endsWith("/")) {
-            throw new UniversalIOException("Invalid path.  Looks like you're trying to retrieve a folder.");
+            UniversalIOException error = new UniversalIOException("Invalid path.  Looks like you're trying to retrieve a folder.");
+            this.triggerOnErrorListeners(error);
+            throw error;
         }
 
-        S3Object object = s3client.getObject(new GetObjectRequest(this.settings.getRoot(), path));
-        return object.getObjectContent();
+        try {
+            S3Object object = s3client.getObject(new GetObjectRequest(this.settings.getRoot(), path));
+            return object.getObjectContent();
+        } catch (Exception e) {
+            UniversalIOException error = new UniversalIOException(e.getMessage());
+            this.triggerOnErrorListeners(error);
+            throw error;
+        }
     }
 
     /**
@@ -436,6 +499,47 @@ public class UniversalS3Storage extends UniversalStorage {
             FileUtils.cleanDirectory(new File(this.settings.getTmp()));
         } catch (Exception e) {
             throw new UniversalIOException(e.getMessage());
+        }
+    }
+
+    /**
+     * This method wipes the root folder of a storage, basically, will remove all files and folder in it.  
+     * Be careful with this method because in too many cases this action won't provide a rollback action.
+     * 
+     * This method loops over the versions for deletion, the bucket will be empty and without any version of its objects.
+     */
+    public void wipe() throws UniversalIOException {
+        ObjectListing object_listing = this.s3client.listObjects(this.settings.getRoot());
+        while (true) {
+            for (Iterator<?> iterator =
+                    object_listing.getObjectSummaries().iterator();
+                    iterator.hasNext();) {
+                S3ObjectSummary summary = (S3ObjectSummary)iterator.next();
+                this.s3client.deleteObject(this.settings.getRoot(), summary.getKey());
+            }
+
+            if (object_listing.isTruncated()) {
+                object_listing = this.s3client.listNextBatchOfObjects(object_listing);
+            } else {
+                break;
+            }
+        };
+
+        VersionListing version_listing = this.s3client.listVersions(
+                new ListVersionsRequest().withBucketName(this.settings.getRoot()));
+        while (true) {
+            for (Iterator<?> iterator = version_listing.getVersionSummaries().iterator(); iterator.hasNext();) {
+                S3VersionSummary vs = (S3VersionSummary) iterator.next();
+                this.s3client.deleteVersion(
+        
+                this.settings.getRoot(), vs.getKey(), vs.getVersionId());
+            }
+
+            if (version_listing.isTruncated()) {
+                version_listing = this.s3client.listNextBatchOfVersions(version_listing);
+            } else {
+                break;
+            }
         }
     }
 }
